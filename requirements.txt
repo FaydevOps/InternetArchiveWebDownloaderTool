@@ -1,0 +1,8 @@
+# Core UI Framework
+customtkinter>=5.2.0
+
+# Download and Extraction Engine
+yt-dlp>=2025.01.01
+
+# Image Processing (For logo.png branding asset)
+Pillow>=10.0.0
