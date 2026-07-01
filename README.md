@@ -27,5 +27,5 @@ Before launching the utility from source code, ensure your environment meets the
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/YOUR_USERNAME/ArchiveDownloader.git](https://github.com/YOUR_USERNAME/ArchiveDownloader.git)
+   git clone [https://github.com/FaydevOps/InternetArchiveWebDownloaderTool.git](https://github.com/FaydevOps/InternetArchiveWebDownloaderTool)
    cd ArchiveDownloader
