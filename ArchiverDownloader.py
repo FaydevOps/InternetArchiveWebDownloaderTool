@@ -79,7 +79,7 @@ class ArchiveDirectDownloader(ctk.CTk):
 
         # Logo Recuperado
         try:
-            ruta_img = resource_path("logo.png")
+            ruta_img = resource_path("assets\logo.png")
             self.logo_image = ctk.CTkImage(
                 light_image=Image.open(ruta_img),
                 dark_image=Image.open(ruta_img),
