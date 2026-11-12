@@ -53,7 +53,7 @@ pip install pyinstaller
 ```
 
 ```bash
-pyinstaller --noconsole --onefile --collect-all customtkinter --add-data "logo.png;." ArchiverDownloader.py
+pyinstaller --noconsole --onefile --icon=assets/logo.ico --collect-all customtkinter --add-data "assets/logo.png;." ArchiverDownloader.py
 ```
 
 Leave out `--add-data` if you don't have a `logo.png`. The executable ends up in `dist/`. In the `.exe` the `yt-dlp` version is fixed at build time: to update it, rebuild.
