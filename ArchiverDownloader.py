@@ -12,7 +12,8 @@ if __name__ == "__main__":
 # --- IMPORTACIONES CARGADAS SOLO EN EL PROCESO PRINCIPAL ---
 import threading
 import subprocess
-import re  
+import re
+import webbrowser
 from urllib.parse import unquote
 
 # Importamos tkinter y ctk aquí dentro para evitar el error de carpetas temporales
@@ -32,7 +33,7 @@ def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
     except Exception:
-        base_path = os.path.abspath(".")
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
 # Configuración inicial
@@ -52,20 +53,24 @@ class ArchiveDirectDownloader(ctk.CTk):
 
     def update_engine(self):
         """ Actualización sin necesidad de Python instalado en el sistema """
+        # En un .exe, sys.executable es la propia app: "-m pip" abriría otra ventana
+        # y además el yt-dlp empaquetado no se puede actualizar por pip.
+        if getattr(sys, "frozen", False):
+            return
         def run_update():
             try:
-                # Usamos banderas para ocultar totalmente la consola de pip
-                subprocess.run(
+                r = subprocess.run(
                     [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
-                    shell=True,
-                    creationflags=0x08000000 
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
-                self.after(0, lambda: self.status_label.configure(text="Motor actualizado"))
-            except:
-                pass
+            except OSError:
+                return
+            if r.returncode == 0:
+                self.after(0, lambda: self.status_label.configure(
+                    text="Motor actualizado (se aplicará al reiniciar)"))
         threading.Thread(target=run_update, daemon=True).start()
 
     def setup_ui(self):
@@ -82,7 +87,7 @@ class ArchiveDirectDownloader(ctk.CTk):
             )
             self.image_label = ctk.CTkLabel(self.main_frame, image=self.logo_image, text="")
             self.image_label.pack(pady=15)
-        except:
+        except (OSError, ValueError):
             self.image_label = ctk.CTkLabel(self.main_frame, text="[ logo.png ]", text_color="gray")
             self.image_label.pack(pady=20)
 
@@ -114,7 +119,7 @@ class ArchiveDirectDownloader(ctk.CTk):
         ctk.CTkLabel(self.don_frame, text="¿Te ha servido el programa?", font=("Segoe UI", 11)).pack(pady=(5,0))
         ctk.CTkButton(self.don_frame, text="☕ Invítame a un Café (Donar)", fg_color="#f39c12", text_color="black",
                       font=ctk.CTkFont(weight="bold"),
-                      command=lambda: subprocess.run(["explorer", "https://paypal.me/FaycraxE"])).pack(pady=10)
+                      command=lambda: webbrowser.open("https://paypal.me/FaycraxE")).pack(pady=10)
 
     def browse_directory(self):
         d = filedialog.askdirectory()
@@ -123,30 +128,57 @@ class ArchiveDirectDownloader(ctk.CTk):
     def start_download(self):
         url = self.url_var.get().strip()
         if not url: return
+        if not url.lower().startswith(("http://", "https://")):
+            MessageBox.showerror("Error", "Introduce una URL que empiece por http:// o https://", parent=self)
+            return
         self.download_btn.configure(state="disabled")
+        self.progress_bar.set(0)
+        self.status_label.configure(text="Descargando...")
         threading.Thread(target=self.download_logic, args=(url,), daemon=True).start()
 
     def download_logic(self, url):
-        raw_filename = unquote(url.split('/')[-1]).split('?')[0]
-        filename = re.sub(r'[<>:"/\\|?*]', '_', raw_filename)
-        if not filename or "." not in filename: filename = "descarga.bin"
-        full_dest = os.path.join(self.output_path.get(), filename)
-        ydl_opts = {'outtmpl': full_dest, 'progress_hooks': [self.update_progress], 'force_generic_extractor': True}
+        # Corta query/fragmento ANTES de decodificar, para no perder un "?" codificado del nombre
+        raw_filename = unquote(url.split('?')[0].split('#')[0].rstrip('/').split('/')[-1])
+        filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', raw_filename).strip(' .')
+        # "%" es sintaxis de plantilla en yt-dlp: hay que escaparlo
+        filename = filename.replace('%', '%%') if "." in filename else '%(title)s.%(ext)s'
+        ydl_opts = {
+            'paths': {'home': self.output_path.get()},
+            'outtmpl': filename,
+            'progress_hooks': [self.update_progress],
+            'force_generic_extractor': True,
+            'noprogress': True,
+        }
         try:
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-            MessageBox.showinfo("Éxito", "Descarga completada")
+            self.after(0, self.on_download_done, "Descarga completada", None)
         except Exception as e:
-            MessageBox.showerror("Error", str(e))
-        finally:
-            self.download_btn.configure(state="normal")
+            self.after(0, self.on_download_done, "Error en la descarga", str(e))
+
+    def on_download_done(self, status, error):
+        # Siempre en el hilo de Tk
+        self.download_btn.configure(state="normal")
+        self.status_label.configure(text=status)
+        if error:
+            MessageBox.showerror("Error", error, parent=self)
+        else:
+            self.progress_bar.set(1)
+            MessageBox.showinfo("Éxito", "Descarga completada", parent=self)
 
     def update_progress(self, d):
-        if d['status'] == 'downloading':
-            try:
-                p = float(d.get('_percent_str', '0%').replace('%','')) / 100
-                self.progress_bar.set(p)
-            except: pass
+        # Se llama desde el hilo de descarga: delegamos en Tk con after()
+        if d['status'] != 'downloading':
+            return
+        total = d.get('total_bytes') or d.get('total_bytes_estimate')
+        done = d.get('downloaded_bytes') or 0
+        mb = done / 1048576
+        if total:
+            text = f"Descargando... {mb:.1f} / {total / 1048576:.1f} MB"
+            self.after(0, self.progress_bar.set, min(done / total, 1))
+        else:
+            text = f"Descargando... {mb:.1f} MB"
+        self.after(0, lambda: self.status_label.configure(text=text))
 
 if __name__ == "__main__":
     # Solo llegamos aquí si somos el MainProcess gracias al bloqueo inicial
@@ -156,5 +188,5 @@ if __name__ == "__main__":
         app.after(15000, app.update_engine) 
         app.mainloop()
     except Exception as e:
-        with open("CRASH_LOG.txt", "w") as f:
+        with open("CRASH_LOG.txt", "w", encoding="utf-8") as f:
             f.write(str(e))
